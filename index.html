@@ -85,10 +85,10 @@
 </head>
 <body>
   <div class="controls">
-    <button onclick="togglePause()">一時停止/再開</button>
-    <button onclick="changeWaterColor()">水の色を変える</button>
-    <button onclick="adjustFishCount(5)">魚を増やす</button>
-    <button onclick="adjustFishCount(-5)">魚を減らす</button>
+    <button id="pauseBtn">一時停止/再開</button>
+    <button id="colorBtn">水の色を変える</button>
+    <button id="addFishBtn">魚を増やす</button>
+    <button id="removeFishBtn">魚を減らす</button>
   </div>
 
   <div class="pomodoro-controls">
@@ -116,29 +116,28 @@
         </select>
       </div>
     </div>
-    <button class="work" onclick="startPomodoro(true)">作業開始</button>
-    <button class="rest" onclick="startPomodoro(false)">休憩開始</button>
-    <button class="reset" onclick="resetPomodoro()">リセット</button>
+    <button id="workBtn" class="work">作業開始</button>
+    <button id="restBtn" class="rest">休憩開始</button>
+    <button id="resetBtn" class="reset">リセット</button>
   </div>
 
   <script>
-    // 音声ファイル
+    // グローバル変数を先に宣言
     let workCompleteSound;
     let breakCompleteSound;
     let soundLoaded = false;
 
     // ポモドーロタイマー設定
-    let pomodoroTime = 0;        // タイマー残り時間（秒）
-    let pomodoroRunning = false; // タイマー実行中か
-    let pomodoroWork = true;     // 作業モードか休憩モードか
-    let pomodoroStartTime = 0;   // タイマー開始時間
-    let lastPomodoroCheck = 0;   // 前回の時間チェック
-    let celebrationMode = false; // お祝いモード（時間切れ時のエフェクト用）
-    let celebrationTime = 0;     // お祝い効果の残り時間
-    let maxFishCount = 70;       // 魚の最大数（これ以上は増えないようにする）
-    let initialFishColors = [];  // 開始時の魚の色（リセット用）
+    let pomodoroTime = 0;
+    let pomodoroRunning = false;
+    let pomodoroWork = true;
+    let pomodoroEndTime = 0;
+    let celebrationMode = false;
+    let celebrationTime = 0;
+    let maxFishCount = 70;
+    let initialFishColors = [];
     
-    // 設定
+    // 設定変数
     let fishes = [];
     let bubbles = [];
     let isPaused = false;
@@ -158,19 +157,9 @@
     let seaweed = [];
     let treasureChests = [];
     let starfishes = [];
-
-    // 音声をロード
-    function preload() {
-      try {
-        soundFormats('mp3');
-        workCompleteSound = loadSound('work-complete.mp3');
-        breakCompleteSound = loadSound('break-complete.mp3');
-        soundLoaded = true;
-      } catch (e) {
-        console.log("音声ファイルのロードに失敗しました。サイレントモードで動作します。", e);
-        soundLoaded = false;
-      }
-    }
+    
+    // ページの可視性監視
+    let isPageVisible = true;
 
     // 魚のクラス
     class Fish {
@@ -183,7 +172,7 @@
         this.maxSpeed = 3;
         this.size = random(4, 8);
         this.colorType = floor(random(4));
-        this.setColor();
+        this.color = null; // 色は後で設定
         this.perception = 50;
         this.wiggleOffset = random(TWO_PI);
         this.wiggleAmount = random(0.3, 0.5);
@@ -470,9 +459,13 @@
         this.segments = floor(random(5, 10));
         this.length = random(50, 150);
         this.width = random(10, 20);
-        this.color = color(34, 139, 34, 150); // 緑
         this.swayAmount = random(0.01, 0.03);
         this.swayOffset = random(TWO_PI);
+        this.color = null; // 色は後で設定
+      }
+
+      setColor() {
+        this.color = color(34, 139, 34, 150); // 緑
       }
 
       update() {
@@ -512,7 +505,7 @@
       }
     }
 
-    // 宝石箱クラス (以前の宝箱をより分かりやすくリデザイン)
+    // 宝石箱クラス
     class TreasureChest {
       constructor() {
         this.position = createVector(random(width), height - random(20, 40));
@@ -521,7 +514,10 @@
         this.openAmount = 0;
         this.glowTime = 0;
         this.jewels = []; // 宝石のパーティクル
-        
+        this.jewelColors = []; // 宝石の色（後で設定）
+      }
+
+      setJewelColors() {
         // ランダムな宝石の色を生成
         this.jewelColors = [
           color(255, 0, 0, 200),    // ルビー
@@ -674,16 +670,16 @@
         this.position = createVector(random(width), height + 10); // 画面の下から少し下に配置
         this.size = random(15, 30);
         this.rotation = random(TWO_PI);
-        this.color = color(random([
-          '#FF6F61', // コーラル
-          '#F28D35', // オレンジ
-          '#FFCC29', // 黄色
-          '#D65D9A'  // ピンク
-        ]));
+        this.colorValue = random(['#FF6F61', '#F28D35', '#FFCC29', '#D65D9A']); // 色の値を保存
+        this.color = null; // 色は後で設定
         this.points = 5;
         this.innerRadius = this.size * 0.4;
         this.wiggleAmount = random(0.005, 0.01);
         this.wiggleOffset = random(TWO_PI);
+      }
+
+      setColor() {
+        this.color = color(this.colorValue);
       }
 
       update() {
@@ -729,14 +725,17 @@
       hourColor = color(255, 50, 50, 200);
       minuteColor = color(50, 255, 50, 200);
       secondColor = color(50, 50, 255, 200);
+      backgroundColor1 = waterColors[currentColorIndex][0];
+      backgroundColor2 = waterColors[currentColorIndex][1];
       
       // 魚を生成
       for (let i = 0; i < fishCount; i++) {
         fishes.push(new Fish());
       }
       
-      // 各魚の初期色を保存（リセット用）
+      // すべてのオブジェクトの色を設定
       for (let fish of fishes) {
+        fish.setColor();
         initialFishColors.push(fish.colorType);
       }
       
@@ -747,21 +746,63 @@
       
       // 海藻を生成
       for (let i = 0; i < 8; i++) {
-        seaweed.push(new Seaweed());
+        let newSeaweed = new Seaweed();
+        newSeaweed.setColor();
+        seaweed.push(newSeaweed);
       }
       
       // 宝石箱を生成
       for (let i = 0; i < 3; i++) {
-        treasureChests.push(new TreasureChest());
+        let newChest = new TreasureChest();
+        newChest.setJewelColors();
+        treasureChests.push(newChest);
       }
       
       // ヒトデを生成
       for (let i = 0; i < 5; i++) {
-        starfishes.push(new Starfish());
+        let newStarfish = new Starfish();
+        newStarfish.setColor();
+        starfishes.push(newStarfish);
       }
       
       // 音声ファイルのロードを試みる
       loadSounds();
+      
+      // イベントリスナーを設定
+      document.getElementById('pauseBtn').addEventListener('click', togglePause);
+      document.getElementById('colorBtn').addEventListener('click', changeWaterColor);
+      document.getElementById('addFishBtn').addEventListener('click', () => adjustFishCount(5));
+      document.getElementById('removeFishBtn').addEventListener('click', () => adjustFishCount(-5));
+      document.getElementById('workBtn').addEventListener('click', () => startPomodoro(true));
+      document.getElementById('restBtn').addEventListener('click', () => startPomodoro(false));
+      document.getElementById('resetBtn').addEventListener('click', resetPomodoro);
+      
+      // ページの可視性変更イベントリスナーを設定
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    }
+    
+    // ページの可視性が変更されたときのハンドラー
+    function handleVisibilityChange() {
+      if (document.hidden) {
+        isPageVisible = false;
+      } else {
+        isPageVisible = true;
+        
+        // ページが表示されたときにタイマーを更新
+        if (pomodoroRunning) {
+          updatePomodoroTimeRemaining();
+        }
+      }
+    }
+    
+    // 残りのポモドーロ時間を更新（非アクティブタブ対応版）
+    function updatePomodoroTimeRemaining() {
+      if (!pomodoroRunning) return;
+      
+      const now = new Date().getTime();
+      const timeRemaining = Math.max(0, Math.floor((pomodoroEndTime - now) / 1000));
+      
+      pomodoroTime = timeRemaining;
     }
     
     // 音声ファイルをロード
@@ -786,6 +827,7 @@
       let hours = now.getHours();
       let minutes = now.getMinutes();
       let seconds = now.getSeconds();
+      let milliseconds = now.getMilliseconds();
       
       // 海藻を描画
       for (let s of seaweed) {
@@ -818,11 +860,13 @@
         }
       }
       
-      // ポモドーロタイマーの管理
-      updatePomodoro();
+      // ポモドーロタイマーの管理（非アクティブタブでも動作）
+      if (pomodoroRunning) {
+        updatePomodoro();
+      }
       
       // 時計の針を描画
-      drawClockHands(hours, minutes, seconds);
+      drawClockHands(hours, minutes, seconds, milliseconds);
       
       // 魚の更新と描画
       for (let fish of fishes) {
@@ -875,8 +919,8 @@
       }
     }
 
-    // 時計の針を描画（改良版）
-    function drawClockHands(h, m, s) {
+    // 時計の針を描画（完全修正版）
+    function drawClockHands(h, m, s, ms) {
       let centerX = width / 2;
       let centerY = height / 2;
       let clockSize = min(width, height) * 0.8;
@@ -930,42 +974,39 @@
         }
       }
       
-      // 針の描画関数
-      function drawHand(angle, length, width, color) {
+      // 針を描画する関数（シンプル版）
+      function drawHandSimple(angle, length, width, handColor) {
         push();
-        rotate(angle);
-        
-        // 針の本体（先細りデザイン）
-        noStroke();
-        fill(color);
-        
-        beginShape();
-        vertex(-width, 0);
-        vertex(0, -length);
-        vertex(width, 0);
-        vertex(0, width);
-        endShape(CLOSE);
-        
-        // 針の装飾
-        fill(255, 100);
-        ellipse(0, -length * 0.7, width * 1.5, width * 1.5);
-        
+        stroke(handColor);
+        strokeWeight(width);
+        strokeCap(ROUND);
+        let x2 = cos(angle) * length;
+        let y2 = sin(angle) * length;
+        line(0, 0, x2, y2);
         pop();
       }
       
-      // 時針
-      let hourAngle = map(h % 12 + m / 60, 0, 12, 0, TWO_PI) - HALF_PI;
-      drawHand(hourAngle, clockSize / 4, 8, hourColor);
+      // 12時間制に変換
+      let hour12 = h % 12;
       
-      // 分針
-      let minuteAngle = map(m + s / 60, 0, 60, 0, TWO_PI) - HALF_PI;
-      drawHand(minuteAngle, clockSize / 3, 6, minuteColor);
+      // ミリ秒を含めた正確な時間
+      let preciseSecond = s + ms / 1000;
+      let preciseMinute = m + preciseSecond / 60;
+      let preciseHour = hour12 + preciseMinute / 60;
       
-      // 秒針
-      let secondAngle = map(s, 0, 60, 0, TWO_PI) - HALF_PI;
-      drawHand(secondAngle, clockSize / 2.5, 3, secondColor);
+      // 秒針（青）
+      let secondAngle = map(preciseSecond, 0, 60, 0, TWO_PI) - HALF_PI;
+      drawHandSimple(secondAngle, clockSize * 0.4, 3, secondColor);
       
-      // 針の中心円
+      // 分針（緑）
+      let minuteAngle = map(preciseMinute, 0, 60, 0, TWO_PI) - HALF_PI;
+      drawHandSimple(minuteAngle, clockSize * 0.35, 5, minuteColor);
+      
+      // 時針（赤）- 12時間形式で計算
+      let hourAngle = map(preciseHour, 0, 12, 0, TWO_PI) - HALF_PI;
+      drawHandSimple(hourAngle, clockSize * 0.25, 7, hourColor);
+      
+      // 中心の円
       fill(255);
       noStroke();
       ellipse(0, 0, 15, 15);
@@ -1029,18 +1070,22 @@
       pop();
     }
 
-    // ポモドーロタイマーの更新
+    // ポモドーロタイマーの更新（非アクティブタブ対応版）
     function updatePomodoro() {
       if (!pomodoroRunning) return;
       
       let now = new Date().getTime();
       
-      // 1秒ごとにカウントダウン
-      if (now - lastPomodoroCheck >= 1000) {
-        pomodoroTime--;
+      // 前回のチェックからの経過時間を計算（秒単位）
+      let elapsed = Math.floor((now - lastPomodoroCheck) / 1000);
+      
+      // 1秒以上経過していたら更新（非アクティブタブでも正確に動作）
+      if (elapsed >= 1) {
+        // 経過した秒数分だけカウントダウン
+        pomodoroTime -= elapsed;
         lastPomodoroCheck = now;
         
-        // タイマーが0になったらモードを切り替え
+        // タイマーが0以下になったらモードを切り替え
         if (pomodoroTime <= 0) {
           if (pomodoroWork) {
             // 作業終了→休憩へ
@@ -1091,8 +1136,8 @@
       
       pomodoroTime = timeValue * 60; // 分を秒に変換
       pomodoroRunning = true;
-      pomodoroStartTime = new Date().getTime();
-      lastPomodoroCheck = pomodoroStartTime;
+      pomodoroEndTime = new Date().getTime() + (pomodoroTime * 1000);
+      lastPomodoroCheck = new Date().getTime();
       
       let message = isWork ? "作業を始めましょう！" : "休憩時間です！";
       startCelebration(message);
@@ -1226,6 +1271,7 @@
         if (fishes.length < maxFishCount) {
           for (let i = 0; i < amount && fishes.length < maxFishCount; i++) {
             let newFish = new Fish();
+            newFish.setColor(); // 色を設定
             fishes.push(newFish);
             initialFishColors.push(newFish.colorType);
           }

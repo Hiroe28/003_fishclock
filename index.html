@@ -1,0 +1,1250 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>お魚水時計ポモドーロタイマー</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: linear-gradient(to bottom, #87CEEB, #1E90FF);
+      font-family: 'Arial Rounded MT Bold', 'Arial', sans-serif;
+    }
+    .controls {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      background-color: rgba(255, 255, 255, 0.7);
+      padding: 10px;
+      border-radius: 10px;
+    }
+    .pomodoro-controls {
+      position: absolute;
+      bottom: 10px;
+      right: 10px;
+      background-color: rgba(255, 255, 255, 0.7);
+      padding: 10px;
+      border-radius: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-width: 180px;
+    }
+    .pomo-label {
+      font-size: 12px;
+      margin-bottom: 2px;
+      font-weight: bold;
+    }
+    button {
+      background-color: #FF9900;
+      border: none;
+      color: white;
+      padding: 8px 16px;
+      border-radius: 20px;
+      margin: 0 5px;
+      cursor: pointer;
+      font-weight: bold;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+    button:hover {
+      background-color: #FFCC00;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    }
+    button.work {
+      background-color: #FF6347;
+    }
+    button.work:hover {
+      background-color: #FF8C7C;
+    }
+    button.rest {
+      background-color: #4CAF50;
+    }
+    button.rest:hover {
+      background-color: #7ECC80;
+    }
+    button.reset {
+      background-color: #6C757D;
+    }
+    button.reset:hover {
+      background-color: #94969A;
+    }
+    .time-selector {
+      display: flex;
+      align-items: center;
+      margin-top: 3px;
+    }
+    select {
+      padding: 5px;
+      border-radius: 5px;
+      border: 1px solid #ccc;
+      margin: 0 5px;
+    }
+  </style>
+</head>
+<body>
+  <div class="controls">
+    <button onclick="togglePause()">一時停止/再開</button>
+    <button onclick="changeWaterColor()">水の色を変える</button>
+    <button onclick="adjustFishCount(5)">魚を増やす</button>
+    <button onclick="adjustFishCount(-5)">魚を減らす</button>
+  </div>
+
+  <div class="pomodoro-controls">
+    <div>
+      <div class="pomo-label">作業時間:</div>
+      <div class="time-selector">
+        <select id="work-minutes">
+          <option value="5">5分</option>
+          <option value="10">10分</option>
+          <option value="15">15分</option>
+          <option value="20">20分</option>
+          <option value="25" selected>25分</option>
+          <option value="30">30分</option>
+        </select>
+      </div>
+    </div>
+    <div>
+      <div class="pomo-label">休憩時間:</div>
+      <div class="time-selector">
+        <select id="rest-minutes">
+          <option value="3">3分</option>
+          <option value="5" selected>5分</option>
+          <option value="8">8分</option>
+          <option value="10">10分</option>
+        </select>
+      </div>
+    </div>
+    <button class="work" onclick="startPomodoro(true)">作業開始</button>
+    <button class="rest" onclick="startPomodoro(false)">休憩開始</button>
+    <button class="reset" onclick="resetPomodoro()">リセット</button>
+  </div>
+
+  <script>
+    // 音声ファイル
+    let workCompleteSound;
+    let breakCompleteSound;
+    let soundLoaded = false;
+
+    // ポモドーロタイマー設定
+    let pomodoroTime = 0;        // タイマー残り時間（秒）
+    let pomodoroRunning = false; // タイマー実行中か
+    let pomodoroWork = true;     // 作業モードか休憩モードか
+    let pomodoroStartTime = 0;   // タイマー開始時間
+    let lastPomodoroCheck = 0;   // 前回の時間チェック
+    let celebrationMode = false; // お祝いモード（時間切れ時のエフェクト用）
+    let celebrationTime = 0;     // お祝い効果の残り時間
+    let maxFishCount = 70;       // 魚の最大数（これ以上は増えないようにする）
+    let initialFishColors = [];  // 開始時の魚の色（リセット用）
+    
+    // 設定
+    let fishes = [];
+    let bubbles = [];
+    let isPaused = false;
+    let fishCount = 50;
+    let hourColor, minuteColor, secondColor;
+    let backgroundColor1 = '#87CEEB';
+    let backgroundColor2 = '#1E90FF';
+    let waterColors = [
+      ['#87CEEB', '#1E90FF'], // 青
+      ['#FF9AA2', '#FFB7B2'], // ピンク
+      ['#FFDAC1', '#E2F0CB'], // パステル
+      ['#B5EAD7', '#C7CEEA'], // ミント
+      ['#E0BBE4', '#957DAD']  // 紫
+    ];
+    let currentColorIndex = 0;
+    let lastSecond = -1;
+    let seaweed = [];
+    let treasureChests = [];
+    let starfishes = [];
+
+    // 音声をロード
+    function preload() {
+      try {
+        soundFormats('mp3');
+        workCompleteSound = loadSound('work-complete.mp3');
+        breakCompleteSound = loadSound('break-complete.mp3');
+        soundLoaded = true;
+      } catch (e) {
+        console.log("音声ファイルのロードに失敗しました。サイレントモードで動作します。", e);
+        soundLoaded = false;
+      }
+    }
+
+    // 魚のクラス
+    class Fish {
+      constructor() {
+        this.position = createVector(random(width), random(height));
+        this.velocity = p5.Vector.random2D();
+        this.velocity.setMag(random(1, 3));
+        this.acceleration = createVector();
+        this.maxForce = 0.2;
+        this.maxSpeed = 3;
+        this.size = random(4, 8);
+        this.colorType = floor(random(4));
+        this.setColor();
+        this.perception = 50;
+        this.wiggleOffset = random(TWO_PI);
+        this.wiggleAmount = random(0.3, 0.5);
+        this.wiggleSpeed = random(0.05, 0.1);
+        this.isHappy = false;
+        this.happyTime = 0;
+      }
+
+      setColor() {
+        // かわいい魚の色
+        switch(this.colorType) {
+          case 0:
+            this.color = color(255, 165, 0, 220); // オレンジ
+            break;
+          case 1:
+            this.color = color(255, 105, 180, 220); // ピンク
+            break;
+          case 2:
+            this.color = color(255, 215, 0, 220); // 金
+            break;
+          case 3:
+            this.color = color(64, 224, 208, 220); // ターコイズ
+            break;
+        }
+      }
+
+      setHappy() {
+        this.isHappy = true;
+        this.happyTime = 180; // 3秒間（60フレーム/秒）
+      }
+
+      avoidEdges() {
+        let desire = null;
+        let margin = 30;
+        
+        if (this.position.x < margin) {
+          desire = createVector(this.maxSpeed, this.velocity.y);
+        } else if (this.position.x > width - margin) {
+          desire = createVector(-this.maxSpeed, this.velocity.y);
+        }
+        
+        if (this.position.y < margin) {
+          desire = desire || createVector(this.velocity.x, this.maxSpeed);
+        } else if (this.position.y > height - margin) {
+          desire = desire || createVector(this.velocity.x, -this.maxSpeed);
+        }
+        
+        if (desire) {
+          desire.normalize();
+          desire.mult(this.maxSpeed);
+          let steer = p5.Vector.sub(desire, this.velocity);
+          steer.limit(this.maxForce * 2);
+          return steer;
+        }
+        return createVector(0, 0);
+      }
+
+      separate(fishes) {
+        let steer = createVector();
+        let count = 0;
+        for (let other of fishes) {
+          let d = p5.Vector.dist(this.position, other.position);
+          if (d > 0 && d < this.perception / 2) {
+            let diff = p5.Vector.sub(this.position, other.position);
+            diff.normalize();
+            diff.div(d);
+            steer.add(diff);
+            count++;
+          }
+        }
+        if (count > 0) {
+          steer.div(count);
+          steer.normalize();
+          steer.mult(this.maxSpeed);
+          steer.sub(this.velocity);
+          steer.limit(this.maxForce);
+        }
+        return steer;
+      }
+
+      align(fishes) {
+        let steer = createVector();
+        let count = 0;
+        for (let other of fishes) {
+          let d = p5.Vector.dist(this.position, other.position);
+          if (d > 0 && d < this.perception) {
+            steer.add(other.velocity);
+            count++;
+          }
+        }
+        if (count > 0) {
+          steer.div(count);
+          steer.normalize();
+          steer.mult(this.maxSpeed);
+          steer.sub(this.velocity);
+          steer.limit(this.maxForce);
+        }
+        return steer;
+      }
+
+      cohesion(fishes) {
+        let target = createVector();
+        let count = 0;
+        for (let other of fishes) {
+          let d = p5.Vector.dist(this.position, other.position);
+          if (d > 0 && d < this.perception) {
+            target.add(other.position);
+            count++;
+          }
+        }
+        if (count > 0) {
+          target.div(count);
+          let desire = p5.Vector.sub(target, this.position);
+          desire.normalize();
+          desire.mult(this.maxSpeed);
+          let steer = p5.Vector.sub(desire, this.velocity);
+          steer.limit(this.maxForce);
+          return steer;
+        }
+        return createVector();
+      }
+
+      update() {
+        if (!isPaused) {
+          // くねくね動きを追加
+          let wiggle = sin(frameCount * this.wiggleSpeed + this.wiggleOffset) * this.wiggleAmount;
+          let perpendicular = createVector(-this.velocity.y, this.velocity.x);
+          perpendicular.normalize();
+          perpendicular.mult(wiggle);
+          this.velocity.add(perpendicular);
+          
+          // ポモドーロモードに基づいて魚の速度調整
+          let speedMultiplier = 1;
+          if (pomodoroRunning) {
+            if (pomodoroWork) {
+              speedMultiplier = 0.8; // 作業中はちょっと穏やか
+            } else {
+              speedMultiplier = 1.5; // 休憩中は活発
+            }
+          }
+          
+          if (this.isHappy) {
+            speedMultiplier *= 1.8; // おめでとうモードはさらに活発
+            this.happyTime--;
+            if (this.happyTime <= 0) {
+              this.isHappy = false;
+            }
+          }
+          
+          this.position.add(p5.Vector.mult(this.velocity, speedMultiplier));
+          this.velocity.add(this.acceleration);
+          this.velocity.limit(this.maxSpeed * speedMultiplier);
+          this.acceleration.mult(0);
+        }
+      }
+
+      applyForce(force) {
+        this.acceleration.add(force);
+      }
+
+      draw() {
+        push();
+        translate(this.position.x, this.position.y);
+        rotate(this.velocity.heading() + PI/2);
+        
+        // 魚の体
+        let fishColor = this.color;
+        
+        // ポモドーロの状態に基づいて色を調整
+        if (pomodoroRunning) {
+          // 「ハッピーモード」（時間切り替わり時）の魚
+          if (this.isHappy) {
+            // 虹色効果
+            let rainbow = color(
+              127 + 127 * sin(frameCount * 0.1 + this.wiggleOffset),
+              127 + 127 * sin(frameCount * 0.1 + this.wiggleOffset + TWO_PI/3),
+              127 + 127 * sin(frameCount * 0.1 + this.wiggleOffset + 2*TWO_PI/3),
+              220
+            );
+            fishColor = rainbow;
+          }
+          // それ以外の時は通常の魚の色
+        }
+        
+        fill(fishColor);
+        noStroke();
+        
+        // かわいい魚の形
+        beginShape();
+        vertex(0, -this.size * 2);
+        bezierVertex(
+          -this.size, -this.size * 1.5,
+          -this.size * 1.5, 0,
+          -this.size, this.size
+        );
+        vertex(0, 0);
+        bezierVertex(
+          this.size, this.size,
+          this.size * 1.5, 0,
+          this.size, -this.size * 1.5
+        );
+        endShape(CLOSE);
+        
+        // 尾びれ
+        fill(fishColor);
+        beginShape();
+        vertex(-this.size / 2, 0);
+        bezierVertex(
+          -this.size / 4, this.size,
+          this.size / 4, this.size,
+          this.size / 2, 0
+        );
+        endShape(CLOSE);
+        
+        // 目
+        fill(255);
+        ellipse(this.size / 2, -this.size / 2, this.size / 2, this.size / 2);
+        fill(0);
+        ellipse(this.size / 2, -this.size / 2, this.size / 4, this.size / 4);
+        
+        pop();
+      }
+
+      flock(fishes) {
+        if (!isPaused) {
+          let separation = this.separate(fishes);
+          let alignment = this.align(fishes);
+          let cohesion = this.cohesion(fishes);
+          let edgeAvoidance = this.avoidEdges();
+
+          separation.mult(1.5);
+          alignment.mult(1.0);
+          cohesion.mult(1.0);
+          edgeAvoidance.mult(1.5);
+
+          this.applyForce(separation);
+          this.applyForce(alignment);
+          this.applyForce(cohesion);
+          this.applyForce(edgeAvoidance);
+        }
+      }
+    }
+
+    // 泡のクラス
+    class Bubble {
+      constructor() {
+        this.position = createVector(random(width), height + random(20));
+        this.size = random(3, 8);
+        this.speed = random(1, 3);
+        this.opacity = random(150, 200);
+        this.wobble = random(0.3, 1);
+        this.wobbleSpeed = random(0.02, 0.05);
+        this.wobbleOffset = random(TWO_PI);
+      }
+
+      update() {
+        if (!isPaused) {
+          this.position.y -= this.speed;
+          this.position.x += sin(frameCount * this.wobbleSpeed + this.wobbleOffset) * this.wobble;
+          
+          if (this.position.y < -this.size) {
+            this.position.y = height + random(20);
+            this.position.x = random(width);
+          }
+        }
+      }
+
+      draw() {
+        push();
+        noStroke();
+        fill(255, 255, 255, this.opacity);
+        ellipse(this.position.x, this.position.y, this.size, this.size);
+        fill(255, 255, 255, this.opacity / 3);
+        ellipse(this.position.x, this.position.y, this.size * 1.5, this.size * 1.5);
+        pop();
+      }
+    }
+
+    // 海藻のクラス
+    class Seaweed {
+      constructor() {
+        this.baseX = random(width);
+        this.baseY = height + 20; // 画面の下から少し下に配置
+        this.segments = floor(random(5, 10));
+        this.length = random(50, 150);
+        this.width = random(10, 20);
+        this.color = color(34, 139, 34, 150); // 緑
+        this.swayAmount = random(0.01, 0.03);
+        this.swayOffset = random(TWO_PI);
+      }
+
+      update() {
+        // windowResized時に位置を再調整するためにbaseYを更新
+        this.baseY = height + 20;
+      }
+
+      draw() {
+        push();
+        noStroke();
+        fill(this.color);
+        
+        let prevX = this.baseX;
+        let prevY = this.baseY;
+        let segmentLength = this.length / this.segments;
+        
+        for (let i = 1; i <= this.segments; i++) {
+          let t = i / this.segments;
+          let sway = sin(frameCount * this.swayAmount + this.swayOffset + i * 0.3) * 15 * t;
+          let segmentWidth = this.width * (1 - t * 0.7);
+          
+          let x = this.baseX + sway;
+          let y = this.baseY - segmentLength * i;
+          
+          beginShape();
+          vertex(prevX - this.width/2, prevY);
+          vertex(prevX + this.width/2, prevY);
+          vertex(x + segmentWidth/2, y);
+          vertex(x - segmentWidth/2, y);
+          endShape(CLOSE);
+          
+          prevX = x;
+          prevY = y;
+        }
+        
+        pop();
+      }
+    }
+
+    // 宝石箱クラス (以前の宝箱をより分かりやすくリデザイン)
+    class TreasureChest {
+      constructor() {
+        this.position = createVector(random(width), height - random(20, 40));
+        this.size = random(40, 60); // 少し大きく
+        this.isOpen = false;
+        this.openAmount = 0;
+        this.glowTime = 0;
+        this.jewels = []; // 宝石のパーティクル
+        
+        // ランダムな宝石の色を生成
+        this.jewelColors = [
+          color(255, 0, 0, 200),    // ルビー
+          color(0, 0, 255, 200),    // サファイア
+          color(0, 255, 127, 200),  // エメラルド
+          color(255, 215, 0, 200),  // 金
+          color(255, 105, 180, 200) // ピンクダイヤモンド
+        ];
+      }
+
+      update() {
+        // ポモドーロ終了時またはタイマー切り替え時に開く
+        if (celebrationMode && !this.isOpen) {
+          this.isOpen = true;
+          this.glowTime = 180; // 3秒間輝く
+          
+          // 宝石のパーティクルを作成
+          for (let i = 0; i < 15; i++) {
+            this.jewels.push({
+              position: createVector(0, -this.size/4),
+              velocity: p5.Vector.random2D().mult(random(1, 3)),
+              size: random(5, 10),
+              color: random(this.jewelColors),
+              life: 180 // 3秒間
+            });
+          }
+        }
+        
+        // 宝石箱の更新
+        if (this.isOpen) {
+          if (this.openAmount < 1) {
+            this.openAmount += 0.05;
+          } else {
+            this.glowTime--;
+            
+            // 宝石のパーティクルの更新
+            for (let i = this.jewels.length - 1; i >= 0; i--) {
+              let jewel = this.jewels[i];
+              jewel.position.add(jewel.velocity);
+              jewel.velocity.y += 0.1; // 重力
+              jewel.life--;
+              
+              if (jewel.life <= 0) {
+                this.jewels.splice(i, 1);
+              }
+            }
+            
+            if (this.glowTime <= 0 && this.jewels.length === 0) {
+              this.isOpen = false;
+              this.openAmount = 0;
+            }
+          }
+        }
+        
+        // 画面サイズの変更に対応
+        this.position.y = constrain(this.position.y, 0, height - 20);
+      }
+
+      draw() {
+        push();
+        translate(this.position.x, this.position.y);
+        
+        // 宝石箱が光る効果
+        if (this.isOpen && this.glowTime > 0) {
+          let glowSize = this.size * 1.5 + sin(frameCount * 0.1) * 5;
+          let glowAlpha = map(this.glowTime, 0, 180, 0, 100);
+          
+          if (pomodoroRunning) {
+            // ポモドーロモードに応じて色を変える
+            if (pomodoroWork) {
+              fill(255, 80, 80, glowAlpha); // 作業モード：赤
+            } else {
+              fill(80, 255, 80, glowAlpha); // 休憩モード：緑
+            }
+          } else {
+            fill(255, 215, 0, glowAlpha); // 通常：金
+          }
+          
+          noStroke();
+          ellipse(0, -this.size/4, glowSize, glowSize);
+        }
+        
+        // 宝石箱の装飾
+        stroke(60, 30, 15);
+        strokeWeight(2);
+        
+        // 箱の本体 (丸みをつけたデザイン)
+        fill(139, 69, 19);
+        rect(-this.size/2, -this.size/2, this.size, this.size/2, 5);
+        
+        // 装飾的な金の縁取り
+        noFill();
+        stroke(218, 165, 32);
+        strokeWeight(1.5);
+        rect(-this.size/2 + 3, -this.size/2 + 3, this.size - 6, this.size/2 - 6, 3);
+        
+        // 宝石箱の蓋
+        push();
+        translate(0, -this.size/2);
+        rotate(-this.openAmount * PI/2.5); // 開く角度
+        
+        // 蓋の本体
+        fill(101, 67, 33);
+        stroke(60, 30, 15);
+        strokeWeight(2);
+        rect(-this.size/2, -this.size/4, this.size, this.size/4, 5, 5, 0, 0);
+        
+        // 蓋の装飾
+        fill(218, 165, 32);
+        rect(-this.size/4, -this.size/8, this.size/2, this.size/12, 2);
+        
+        // 鍵穴
+        fill(0);
+        ellipse(0, 0, this.size/10, this.size/10);
+        
+        pop();
+        
+        // 宝石のパーティクルを描画
+        for (let jewel of this.jewels) {
+          fill(jewel.color);
+          noStroke();
+          
+          // キラキラした宝石の形
+          push();
+          translate(jewel.position.x, jewel.position.y);
+          rotate(frameCount * 0.1);
+          
+          // ダイヤモンド形
+          beginShape();
+          vertex(0, -jewel.size/2);
+          vertex(jewel.size/2, 0);
+          vertex(0, jewel.size/2);
+          vertex(-jewel.size/2, 0);
+          endShape(CLOSE);
+          
+          // キラキラ効果
+          fill(255, 255, 255, 150);
+          ellipse(0, 0, jewel.size/3, jewel.size/3);
+          
+          pop();
+        }
+        
+        pop();
+      }
+    }
+
+    // ヒトデクラス
+    class Starfish {
+      constructor() {
+        this.position = createVector(random(width), height + 10); // 画面の下から少し下に配置
+        this.size = random(15, 30);
+        this.rotation = random(TWO_PI);
+        this.color = color(random([
+          '#FF6F61', // コーラル
+          '#F28D35', // オレンジ
+          '#FFCC29', // 黄色
+          '#D65D9A'  // ピンク
+        ]));
+        this.points = 5;
+        this.innerRadius = this.size * 0.4;
+        this.wiggleAmount = random(0.005, 0.01);
+        this.wiggleOffset = random(TWO_PI);
+      }
+
+      update() {
+        if (!isPaused) {
+          this.rotation += sin(frameCount * this.wiggleAmount + this.wiggleOffset) * 0.01;
+        }
+        
+        // windowResized時に位置を再調整
+        this.position.y = height + 10;
+      }
+
+      draw() {
+        push();
+        translate(this.position.x, this.position.y);
+        rotate(this.rotation);
+        
+        fill(this.color);
+        noStroke();
+        
+        beginShape();
+        for (let i = 0; i < this.points * 2; i++) {
+          let radius = i % 2 === 0 ? this.size : this.innerRadius;
+          let angle = map(i, 0, this.points * 2, 0, TWO_PI);
+          let x = cos(angle) * radius;
+          let y = sin(angle) * radius;
+          vertex(x, y);
+        }
+        endShape(CLOSE);
+        
+        // 中央の円
+        fill(255, 100);
+        ellipse(0, 0, this.innerRadius * 1.2, this.innerRadius * 1.2);
+        
+        pop();
+      }
+    }
+
+    // p5.jsのセットアップ関数
+    function setup() {
+      createCanvas(windowWidth, windowHeight);
+      
+      // 色の初期化
+      hourColor = color(255, 50, 50, 200);
+      minuteColor = color(50, 255, 50, 200);
+      secondColor = color(50, 50, 255, 200);
+      
+      // 魚を生成
+      for (let i = 0; i < fishCount; i++) {
+        fishes.push(new Fish());
+      }
+      
+      // 各魚の初期色を保存（リセット用）
+      for (let fish of fishes) {
+        initialFishColors.push(fish.colorType);
+      }
+      
+      // 泡を生成
+      for (let i = 0; i < 50; i++) {
+        bubbles.push(new Bubble());
+      }
+      
+      // 海藻を生成
+      for (let i = 0; i < 8; i++) {
+        seaweed.push(new Seaweed());
+      }
+      
+      // 宝石箱を生成
+      for (let i = 0; i < 3; i++) {
+        treasureChests.push(new TreasureChest());
+      }
+      
+      // ヒトデを生成
+      for (let i = 0; i < 5; i++) {
+        starfishes.push(new Starfish());
+      }
+      
+      // 音声ファイルのロードを試みる
+      loadSounds();
+    }
+    
+    // 音声ファイルをロード
+    function loadSounds() {
+      try {
+        workCompleteSound = new Audio('work-complete.mp3');
+        breakCompleteSound = new Audio('break-complete.mp3');
+        soundLoaded = true;
+      } catch (e) {
+        console.log("音声ファイルのロードに失敗しました。サイレントモードで動作します。", e);
+        soundLoaded = false;
+      }
+    }
+
+    // p5.jsの描画関数
+    function draw() {
+      // 背景のグラデーション
+      setGradient(0, 0, width, height, color(backgroundColor1), color(backgroundColor2));
+      
+      // 現在時刻を取得
+      let now = new Date();
+      let hours = now.getHours();
+      let minutes = now.getMinutes();
+      let seconds = now.getSeconds();
+      
+      // 海藻を描画
+      for (let s of seaweed) {
+        s.update();
+        s.draw();
+      }
+      
+      // ヒトデを描画
+      for (let s of starfishes) {
+        s.update();
+        s.draw();
+      }
+      
+      // 宝石箱を描画
+      for (let chest of treasureChests) {
+        chest.update();
+        chest.draw();
+      }
+      
+      // 秒が変わったときに特別な効果
+      if (lastSecond !== seconds) {
+        lastSecond = seconds;
+        
+        // 5秒ごとに魚の色を更新（通常モード時）
+        if (seconds % 5 === 0 && !pomodoroRunning) {
+          for (let fish of fishes) {
+            fish.colorType = floor(random(4));
+            fish.setColor();
+          }
+        }
+      }
+      
+      // ポモドーロタイマーの管理
+      updatePomodoro();
+      
+      // 時計の針を描画
+      drawClockHands(hours, minutes, seconds);
+      
+      // 魚の更新と描画
+      for (let fish of fishes) {
+        fish.flock(fishes);
+        fish.update();
+        fish.draw();
+      }
+      
+      // 泡を更新と描画
+      for (let bubble of bubbles) {
+        bubble.update();
+        bubble.draw();
+      }
+      
+      // お祝いモードによる特殊効果
+      if (celebrationMode) {
+        createCelebrationEffects();
+        celebrationTime--;
+        if (celebrationTime <= 0) {
+          celebrationMode = false;
+        }
+      }
+      
+      // デジタル時計表示
+      drawDigitalClock(hours, minutes, seconds);
+      
+      // ポモドーロタイマー表示
+      if (pomodoroRunning) {
+        drawPomodoroTimer();
+      }
+      
+      // 情報表示
+      fill(255);
+      noStroke();
+      textSize(16);
+      textAlign(LEFT);
+      text(`魚の数: ${fishes.length}匹`, 10, 20);
+      textAlign(RIGHT);
+      text(`FPS: ${floor(frameRate())}`, width - 10, 20);
+    }
+
+    // 背景のグラデーション
+    function setGradient(x, y, w, h, c1, c2) {
+      noFill();
+      for (let i = y; i <= y + h; i++) {
+        let inter = map(i, y, y + h, 0, 1);
+        let c = lerpColor(c1, c2, inter);
+        stroke(c);
+        line(x, i, x + w, i);
+      }
+    }
+
+    // 時計の針を描画（改良版）
+    function drawClockHands(h, m, s) {
+      let centerX = width / 2;
+      let centerY = height / 2;
+      let clockSize = min(width, height) * 0.8;
+      
+      push();
+      translate(centerX, centerY);
+      
+      // 時計の円
+      noFill();
+      stroke(255, 80);
+      strokeWeight(3);
+      ellipse(0, 0, clockSize, clockSize);
+      
+      // 時間のマーカー
+      for (let i = 0; i < 12; i++) {
+        let angle = map(i, 0, 12, 0, TWO_PI) - HALF_PI;
+        
+        if (i % 3 === 0) {
+          // 3時間ごとに大きな目盛り
+          let x1 = cos(angle) * (clockSize / 2 - 15);
+          let y1 = sin(angle) * (clockSize / 2 - 15);
+          let x2 = cos(angle) * (clockSize / 2);
+          let y2 = sin(angle) * (clockSize / 2);
+          
+          strokeWeight(4);
+          stroke(255, 150);
+          line(x1, y1, x2, y2);
+          
+          // 数字を表示
+          push();
+          let numX = cos(angle) * (clockSize / 2 - 35);
+          let numY = sin(angle) * (clockSize / 2 - 35);
+          translate(numX, numY);
+          
+          noStroke();
+          fill(255, 200);
+          textAlign(CENTER, CENTER);
+          textSize(clockSize / 20);
+          text(i === 0 ? 12 : i, 0, 0);
+          pop();
+        } else {
+          // 通常の目盛り
+          let x1 = cos(angle) * (clockSize / 2 - 5);
+          let y1 = sin(angle) * (clockSize / 2 - 5);
+          let x2 = cos(angle) * (clockSize / 2);
+          let y2 = sin(angle) * (clockSize / 2);
+          
+          strokeWeight(2);
+          stroke(255, 100);
+          line(x1, y1, x2, y2);
+        }
+      }
+      
+      // 針の描画関数
+      function drawHand(angle, length, width, color) {
+        push();
+        rotate(angle);
+        
+        // 針の本体（先細りデザイン）
+        noStroke();
+        fill(color);
+        
+        beginShape();
+        vertex(-width, 0);
+        vertex(0, -length);
+        vertex(width, 0);
+        vertex(0, width);
+        endShape(CLOSE);
+        
+        // 針の装飾
+        fill(255, 100);
+        ellipse(0, -length * 0.7, width * 1.5, width * 1.5);
+        
+        pop();
+      }
+      
+      // 時針
+      let hourAngle = map(h % 12 + m / 60, 0, 12, 0, TWO_PI) - HALF_PI;
+      drawHand(hourAngle, clockSize / 4, 8, hourColor);
+      
+      // 分針
+      let minuteAngle = map(m + s / 60, 0, 60, 0, TWO_PI) - HALF_PI;
+      drawHand(minuteAngle, clockSize / 3, 6, minuteColor);
+      
+      // 秒針
+      let secondAngle = map(s, 0, 60, 0, TWO_PI) - HALF_PI;
+      drawHand(secondAngle, clockSize / 2.5, 3, secondColor);
+      
+      // 針の中心円
+      fill(255);
+      noStroke();
+      ellipse(0, 0, 15, 15);
+      
+      // 内側の円
+      fill(150);
+      ellipse(0, 0, 8, 8);
+      
+      pop();
+    }
+
+    // デジタル時計表示
+    function drawDigitalClock(h, m, s) {
+      let timeString = 
+        String(h).padStart(2, '0') + ':' + 
+        String(m).padStart(2, '0') + ':' + 
+        String(s).padStart(2, '0');
+      
+      push();
+      textSize(32);
+      textAlign(CENTER, TOP);
+      fill(255);
+      stroke(0, 100);
+      strokeWeight(3);
+      text(timeString, width / 2, 20);
+      pop();
+    }
+
+    // ポモドーロタイマー表示
+    function drawPomodoroTimer() {
+      if (!pomodoroRunning) return;
+      
+      let minutes = Math.floor(pomodoroTime / 60);
+      let seconds = pomodoroTime % 60;
+      let timerString = String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0');
+      let statusText = pomodoroWork ? "作業中" : "休憩中";
+      
+      // 時間が短くなると点滅する効果
+      let alpha = 255;
+      if (pomodoroTime < 10) {
+        alpha = map(sin(frameCount * 0.2), -1, 1, 150, 255);
+      }
+      
+      push();
+      textAlign(CENTER, TOP);
+      textSize(40);
+      
+      // タイマーの背景色
+      noStroke();
+      fill(0, 120);
+      rect(width/2 - 150, 60, 300, 60, 10);
+      
+      // ステータスと残り時間
+      if (pomodoroWork) {
+        fill(255, 100, 100, alpha);
+      } else {
+        fill(100, 255, 100, alpha);
+      }
+      
+      text(statusText + " " + timerString, width/2, 70);
+      pop();
+    }
+
+    // ポモドーロタイマーの更新
+    function updatePomodoro() {
+      if (!pomodoroRunning) return;
+      
+      let now = new Date().getTime();
+      
+      // 1秒ごとにカウントダウン
+      if (now - lastPomodoroCheck >= 1000) {
+        pomodoroTime--;
+        lastPomodoroCheck = now;
+        
+        // タイマーが0になったらモードを切り替え
+        if (pomodoroTime <= 0) {
+          if (pomodoroWork) {
+            // 作業終了→休憩へ
+            pomodoroWork = false;
+            let restMinutes = parseInt(document.getElementById('rest-minutes').value);
+            pomodoroTime = restMinutes * 60;
+            startCelebration("休憩時間です！");
+            
+            // 音を鳴らす（作業完了）
+            if (soundLoaded) {
+              try {
+                workCompleteSound.play();
+              } catch (e) {
+                console.log("サウンド再生エラー:", e);
+              }
+            }
+          } else {
+            // 休憩終了→作業へ
+            pomodoroWork = true;
+            let workMinutes = parseInt(document.getElementById('work-minutes').value);
+            pomodoroTime = workMinutes * 60;
+            startCelebration("作業を始めましょう！");
+            
+            // 音を鳴らす（休憩完了）
+            if (soundLoaded) {
+              try {
+                breakCompleteSound.play();
+              } catch (e) {
+                console.log("サウンド再生エラー:", e);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // ポモドーロタイマー開始
+    function startPomodoro(isWork) {
+      pomodoroWork = isWork;
+      
+      // 選択された時間を取得
+      let timeValue;
+      if (isWork) {
+        timeValue = parseInt(document.getElementById('work-minutes').value);
+      } else {
+        timeValue = parseInt(document.getElementById('rest-minutes').value);
+      }
+      
+      pomodoroTime = timeValue * 60; // 分を秒に変換
+      pomodoroRunning = true;
+      pomodoroStartTime = new Date().getTime();
+      lastPomodoroCheck = pomodoroStartTime;
+      
+      let message = isWork ? "作業を始めましょう！" : "休憩時間です！";
+      startCelebration(message);
+    }
+
+    // ポモドーロタイマーリセット
+    function resetPomodoro() {
+      pomodoroRunning = false;
+      pomodoroTime = 0;
+      
+      // 魚の色をリセット
+      for (let i = 0; i < fishes.length && i < initialFishColors.length; i++) {
+        fishes[i].colorType = initialFishColors[i];
+        fishes[i].setColor();
+      }
+    }
+
+    // お祝いモード開始
+    function startCelebration(message) {
+      celebrationMode = true;
+      celebrationTime = 180; // 3秒間
+      
+      // メッセージを表示
+      push();
+      textAlign(CENTER, CENTER);
+      textSize(50);
+      fill(255, 255, 255, 200);
+      stroke(0, 100);
+      strokeWeight(5);
+      text(message, width/2, height/2);
+      pop();
+      
+      // 魚をハッピーモードに
+      for (let fish of fishes) {
+        fish.setHappy();
+      }
+      
+      // 泡を多めに発生
+      for (let i = 0; i < 50; i++) {
+        bubbles.push(new Bubble());
+      }
+      
+      // 古いバブルを削除して最適化
+      if (bubbles.length > 200) {
+        bubbles.splice(0, bubbles.length - 200);
+      }
+    }
+
+    // お祝いエフェクト
+    function createCelebrationEffects() {
+      // キラキラ効果
+      for (let i = 0; i < 5; i++) {
+        let x = random(width);
+        let y = random(height);
+        let size = random(5, 20);
+        
+        push();
+        noStroke();
+        fill(255, 255, 100, random(100, 200));
+        star(x, y, size, size * 2, 5);
+        pop();
+      }
+      
+      // メッセージ表示
+      if (celebrationTime > 120) {
+        push();
+        textAlign(CENTER, CENTER);
+        textSize(40);
+        
+        let textColor;
+        if (pomodoroWork) {
+          textColor = color(255, 80, 80);
+        } else {
+          textColor = color(80, 255, 80);
+        }
+        
+        fill(textColor);
+        stroke(0, 100);
+        strokeWeight(4);
+        
+        let message = pomodoroWork ? "作業を始めましょう！" : "休憩時間です！";
+        text(message, width/2, height/3);
+        pop();
+      }
+    }
+
+    // 星の描画
+    function star(x, y, radius1, radius2, npoints) {
+      let angle = TWO_PI / npoints;
+      let halfAngle = angle / 2.0;
+      beginShape();
+      for (let a = 0; a < TWO_PI; a += angle) {
+        let sx = x + cos(a) * radius2;
+        let sy = y + sin(a) * radius2;
+        vertex(sx, sy);
+        sx = x + cos(a + halfAngle) * radius1;
+        sy = y + sin(a + halfAngle) * radius1;
+        vertex(sx, sy);
+      }
+      endShape(CLOSE);
+    }
+
+    // ウィンドウサイズ変更時
+    function windowResized() {
+      resizeCanvas(windowWidth, windowHeight);
+      
+      // 海藻とヒトデの位置を調整
+      for (let s of seaweed) {
+        s.update();
+      }
+      
+      for (let s of starfishes) {
+        s.update();
+      }
+      
+      // 宝石箱の位置も調整
+      for (let chest of treasureChests) {
+        chest.position.y = constrain(chest.position.y, 0, height - 20);
+      }
+    }
+
+    // 一時停止/再開
+    function togglePause() {
+      isPaused = !isPaused;
+    }
+
+    // 魚の数を調整
+    function adjustFishCount(amount) {
+      if (amount > 0) {
+        // 魚を増やす
+        if (fishes.length < maxFishCount) {
+          for (let i = 0; i < amount && fishes.length < maxFishCount; i++) {
+            let newFish = new Fish();
+            fishes.push(newFish);
+            initialFishColors.push(newFish.colorType);
+          }
+        }
+      } else {
+        // 魚を減らす
+        if (fishes.length + amount >= 10) { // 最低10匹は残す
+          fishes.splice(fishes.length + amount, -amount);
+          initialFishColors.splice(initialFishColors.length + amount, -amount);
+        }
+      }
+    }
+
+    // 水の色を変える
+    function changeWaterColor() {
+      currentColorIndex = (currentColorIndex + 1) % waterColors.length;
+      backgroundColor1 = waterColors[currentColorIndex][0];
+      backgroundColor2 = waterColors[currentColorIndex][1];
+    }
+  </script>
+</body>
+</html>
